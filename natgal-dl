@@ -1,8 +1,11 @@
 #!/usr/bin/env ruby
+require "rubygems"
 require "open-uri"
 require "fileutils"
 require "progressbar"
 require "cgi"
+require 'mechanize'
+require "fastercsv"
 
 unless system("convert -h > /dev/null")
   raise "ImageMagick is not installed or not in the path."
@@ -15,6 +18,7 @@ class NationalGallery
   TILE_URI   = "http://www.nationalgallery.org.uk/tile.php?id=%s"
   USER_AGENT = "Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 6.0)"
   TEMP_DIR   = "/tmp/natgal-tiles"
+  DEST_DIR   = "#{File.dirname(__FILE__)}/output"
 
   attr_reader :page_uri
 
@@ -34,7 +38,7 @@ class NationalGallery
 
 private
   def filename
-    title.gsub(/[^a-z0-9]+/i, "-") + ".jpg"
+    %(#{title.gsub(/[^a-z0-9]+/i, "-")}.jpg)
   end
 
   def stitch_tiles(files, destination)
@@ -46,6 +50,8 @@ private
   end
 
   def crop(source, destination)
+    FileUtils.mkdir_p(DEST_DIR)
+    destination = "#{DEST_DIR}/#{destination}"
     final_size = "%dx%d+0+0" % [width.ceil, height.ceil]
     report "Cropping" do
       system("convert", "-crop", final_size, source, destination)
@@ -95,9 +101,10 @@ private
     path = local_tile_path(x, y)
     return if File.exist?(path)
     FileUtils.mkdir_p(File.dirname(path))
-    data = get(tile_uri(x, y))
+    # data = get(tile_uri(x, y))
+    data = (WWW::Mechanize.new).get(tile_uri(x,y))  
     File.open(path, "wb") do |f|
-      f << data
+      f << data.body
     end
   end
 
@@ -155,7 +162,7 @@ private
   end
 
   def title
-    CGI.unescapeHTML(page_source[%r{<h1[^>]*>([^<]+)</h1>}, 1])
+    CGI.unescapeHTML(page_source[%r{<title[^>]*>([^<]+)</title>}, 1])
   end
 
   def page_source
@@ -163,7 +170,8 @@ private
   end
 
   def get(uri)
-    open(uri, "User-Agent" => USER_AGENT, "Referer" => page_uri){ |f| f.read }
+    (WWW::Mechanize.new).get(page_uri).body
+    # open(uri, "User-Agent" => USER_AGENT, "Referer" => page_uri, :proxy => nil){ |f| f.read }
   end
 
   def report(message)
@@ -174,14 +182,75 @@ private
   end
 end
 
+
+class NationalGalleryIndexer
+  
+  FULL_LIST = "#{File.dirname(__FILE__)}/full_list.csv"
+  
+  attr_reader :agent, :link_list
+  
+  def self.all_images
+    NationalGalleryIndexer.new.spider unless File.exists?(FULL_LIST)
+    FasterCSV.read(FULL_LIST)
+  end
+  
+  def initialize
+    @link_list = []
+    @agent = WWW::Mechanize.new
+    @base_url = 'http://nationalgallery.org.uk/artists/'
+    @letter_links = agent.get(@base_url).search('.topLinks ul.letterLinks a').map {|link| link['href']}
+  end
+  
+  def spider
+    @page = agent.get(@base_url)
+    @letter_links.each do |letter|
+      harvest_links(letter)
+      letter_groups(letter).each {|letter_group| harvest_links(letter_group)}
+    end
+    # return @link_list
+    FasterCSV.open(FULL_LIST, "a") do |csv|
+      @link_list.each {|link| csv << link.sub(/www\./, '')}
+    end
+  end
+  
+  def letter_groups(letter)
+    agent.get(letter).search('.topLinks ul.letterGroups a').map {|link| link['href']}.slice(1..-1)
+  end
+  
+  def harvest_links(url)
+    agent.get(url).search('.preview .content a').each do |link|
+      @link_list << link['href']
+    end
+  end
+  
+end
+
 if ARGV.empty?
   puts "Usage: #{$0} gallery_uri [gallery_uri [...]]"
 end
 
-ARGV.each do |uri|
-  begin
-    NationalGallery.new(uri).grab
-  rescue NationalGallery::NoDataError
-    $stderr.puts "This painting does not appear to be available at high resolution."
+# images = ARGV[0].upcase == 'ALL' ? NationalGalleryIndexer.new.spider :  ARGV
+# images = ARGV[0].upcase == 'ALL' ? FasterCSV.read("#{File.dirname(__FILE__)}/list.csv") :  ARGV
+images = ARGV[0].upcase == 'ALL' ? NationalGalleryIndexer.all_images :  ARGV
+
+if ARGV[0].upcase == 'ALL'
+  all       = images
+  done      = FasterCSV.read("#{File.dirname(__FILE__)}/done.csv")
+  remaining = all - done
+  puts "all: #{all.size}"
+  puts "done: #{done.size}"
+  puts "remaining: #{remaining.size}"
+end
+
+FasterCSV.open("#{File.dirname(__FILE__)}/done.csv", "a") do |csv|
+  remaining.each do |uri|
+    begin
+      NationalGallery.new(uri.first).grab
+      csv << [uri.first]
+    rescue NationalGallery::NoDataError
+      $stderr.puts "This painting does not appear to be available at high resolution."
+      csv << [uri.first]
+    end
   end
 end
+
