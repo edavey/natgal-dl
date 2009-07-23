@@ -9,6 +9,8 @@ Prerequisites
 * Ruby
 * The Ruby progressbar library
 * ImageMagick
+* FasterCSV
+* Mechanize
 
 On Ubuntu:
 
@@ -22,6 +24,12 @@ Usage
 E.g.
 
     natgal-dl http://www.nationalgallery.org.uk/paintings/hans-holbein-the-younger-the-ambassadors
+
+If you want all the images:
+
+    natgal-dl all
+    
+The first time you run the script with `all` a list of links is saved to file. As the script works through that list each completed item is added to a 'done' list. In this way if the process is interrupted for any reason (network timeouts seem common on the gallery's server) the job picks up where it left off.
 
 What it does
 ------------
