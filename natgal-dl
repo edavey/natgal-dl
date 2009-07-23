@@ -207,7 +207,6 @@ class NationalGalleryIndexer
       harvest_links(letter)
       letter_groups(letter).each {|letter_group| harvest_links(letter_group)}
     end
-    # return @link_list
     FasterCSV.open(FULL_LIST, "a") do |csv|
       @link_list.each {|link| csv << link.sub(/www\./, '')}
     end
@@ -229,8 +228,6 @@ if ARGV.empty?
   puts "Usage: #{$0} gallery_uri [gallery_uri [...]]"
 end
 
-# images = ARGV[0].upcase == 'ALL' ? NationalGalleryIndexer.new.spider :  ARGV
-# images = ARGV[0].upcase == 'ALL' ? FasterCSV.read("#{File.dirname(__FILE__)}/list.csv") :  ARGV
 images = ARGV[0].upcase == 'ALL' ? NationalGalleryIndexer.all_images :  ARGV
 
 if ARGV[0].upcase == 'ALL'
